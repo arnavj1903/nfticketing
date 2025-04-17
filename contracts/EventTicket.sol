@@ -56,8 +56,9 @@ contract EventTicket is ERC721, ERC721Enumerable, Ownable {
         return ticketId;
     }
 
-    function useTicket(uint256 _ticketId) public {
-        require(ownerOf(_ticketId) == msg.sender, "Not the ticket owner");
+    // Modified to ensure only owner can mark tickets as used
+    function useTicket(uint256 _ticketId) public onlyOwner {
+        require(_ticketId < _tokenIdCounter, "Ticket does not exist");
         require(!usedTickets[_ticketId], "Ticket already used");
 
         usedTickets[_ticketId] = true;
@@ -104,8 +105,13 @@ contract EventTicket is ERC721, ERC721Enumerable, Ownable {
         ticketMetadata[_ticketId] = _metadata;
     }
 
+    // Updated withdraw function to ensure it works correctly
     function withdraw() public onlyOwner {
-        payable(owner()).transfer(address(this).balance);
+        uint256 balance = address(this).balance;
+        require(balance > 0, "No funds to withdraw");
+        
+        (bool success, ) = payable(owner()).call{value: balance}("");
+        require(success, "Transfer failed");
     }
 
     // Helper function to convert uint to string

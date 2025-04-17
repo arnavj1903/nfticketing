@@ -13,6 +13,7 @@ const actionsPanel = document.getElementById('actionsPanel');
 const organizerPanel = document.getElementById('organizerPanel');
 const noTicketsMessage = document.getElementById('noTicketsMessage');
 const myTickets = document.getElementById('myTickets');
+const allTickets = document.getElementById('allTickets');
 
 // Initialize application
 async function init() {
@@ -60,6 +61,10 @@ async function connectWallet() {
     // Show organizer panel if user is owner
     if (isOwner) {
       organizerPanel.style.display = 'block';
+      // Load all tickets for owner
+      await loadAllTickets();
+    } else {
+      organizerPanel.style.display = 'none';
     }
     
     // Load event details
@@ -88,10 +93,10 @@ function setupEventListeners() {
   
   // Button events
   document.getElementById('buyTicketBtn').addEventListener('click', buyTicket);
-  document.getElementById('useTicketBtn').addEventListener('click', useTicket);
   document.getElementById('transferTicketBtn').addEventListener('click', showTransferModal);
   document.getElementById('confirmTransferBtn').addEventListener('click', transferTicket);
   document.getElementById('withdrawBtn').addEventListener('click', withdrawFunds);
+  document.getElementById('refreshAllTicketsBtn').addEventListener('click', loadAllTickets);
 }
 
 // Handle accounts change
@@ -115,6 +120,7 @@ function handleAccountsChanged(accounts) {
           isOwner = owner.toLowerCase() === currentAccount.toLowerCase();
           if (isOwner) {
             organizerPanel.style.display = 'block';
+            loadAllTickets();
           } else {
             organizerPanel.style.display = 'none';
           }
@@ -144,6 +150,91 @@ async function loadEventDetails() {
   } catch (error) {
     console.error('Error loading event details:', error);
   }
+}
+
+// Load all tickets (for owner)
+async function loadAllTickets() {
+  if (!isOwner) return;
+  
+  try {
+    // Clear existing tickets
+    allTickets.innerHTML = '';
+    
+    // Get total supply
+    const totalSupply = await contract.totalSupply();
+    
+    if (totalSupply > 0) {
+      document.getElementById('noAllTicketsMessage').style.display = 'none';
+      
+      // Loop through all tickets
+      for (let i = 0; i < totalSupply; i++) {
+        try {
+          // Get token ID - We assume tokens are minted sequentially
+          const tokenId = i;
+          // Get owner of token
+          const owner = await contract.ownerOf(tokenId);
+          // Get metadata
+          const metadata = await contract.getTicketMetadata(tokenId);
+          // Check if used
+          const isUsed = await contract.isTicketUsed(tokenId);
+          
+          // Create ticket card
+          const ticketCard = createAllTicketsCard(tokenId, owner, metadata, isUsed);
+          allTickets.appendChild(ticketCard);
+        } catch (error) {
+          console.error(`Error loading ticket ${i}:`, error);
+          // Continue with next ticket if one fails
+          continue;
+        }
+      }
+      
+    } else {
+      document.getElementById('noAllTicketsMessage').style.display = 'block';
+    }
+    
+  } catch (error) {
+    console.error('Error loading all tickets:', error);
+  }
+}
+
+// Create all tickets card element (for owner)
+function createAllTicketsCard(ticketId, owner, metadata, isUsed) {
+  const col = document.createElement('div');
+  col.className = 'col-md-6 col-lg-4';
+  
+  const card = document.createElement('div');
+  card.className = 'card my-ticket';
+  card.dataset.ticketId = ticketId;
+  
+  if (isUsed) {
+    card.classList.add('bg-light');
+  }
+  
+  const cardBody = document.createElement('div');
+  cardBody.className = 'card-body';
+  
+  const title = document.createElement('h5');
+  title.className = 'card-title';
+  title.textContent = `Ticket #${ticketId}`;
+  
+  const ownerText = document.createElement('p');
+  ownerText.className = 'small';
+  ownerText.textContent = `Owner: ${owner.substring(0, 6)}...${owner.substring(owner.length - 4)}`;
+  
+  const status = document.createElement('p');
+  status.className = isUsed ? 'text-danger' : 'text-success';
+  status.textContent = isUsed ? 'Used' : 'Valid';
+  
+  cardBody.appendChild(title);
+  cardBody.appendChild(ownerText);
+  cardBody.appendChild(status);
+  card.appendChild(cardBody);
+  col.appendChild(card);
+  
+  // Add event listener to show modal
+  card.addEventListener('click', () => showOwnerTicketModal(ticketId, owner, metadata, isUsed));
+  
+  return col;
 }
 
 // Load user's tickets
@@ -213,7 +304,7 @@ function createTicketCard(ticketId, metadata, isUsed) {
   return col;
 }
 
-// Show ticket modal
+// Show ticket modal for regular users
 async function showTicketModal(ticketId, metadata, isUsed) {
   try {
     // Parse metadata
@@ -230,12 +321,15 @@ async function showTicketModal(ticketId, metadata, isUsed) {
     document.getElementById('modalTicketStatus').textContent = isUsed ? 'Used' : 'Valid';
     document.getElementById('modalTicketStatus').className = isUsed ? 'text-danger' : 'text-success';
     
+    // Remove use ticket button for regular users (only owner can use tickets now)
+    if (document.getElementById('ticketModal').querySelector('#useTicketBtn')) {
+      document.getElementById('ticketModal').querySelector('#useTicketBtn').style.display = 'none';
+    }
+    
     // Button state
-    document.getElementById('useTicketBtn').disabled = isUsed;
     document.getElementById('transferTicketBtn').disabled = isUsed;
     
     // Set ticket ID for actions
-    document.getElementById('useTicketBtn').dataset.ticketId = ticketId;
     document.getElementById('transferTicketBtn').dataset.ticketId = ticketId;
     
     // Generate QR code
@@ -258,6 +352,49 @@ async function showTicketModal(ticketId, metadata, isUsed) {
   }
 }
 
+// Show ticket modal for owner
+async function showOwnerTicketModal(ticketId, owner, metadata, isUsed) {
+  try {
+    // Parse metadata
+    const parts = metadata.split(', ');
+    const eventName = parts[0].replace('Event: ', '');
+    const eventDate = parts[1].replace('Date: ', '');
+    const eventVenue = parts[2].replace('Venue: ', '');
+    
+    // Set modal content
+    document.getElementById('ownerModalEventName').textContent = eventName;
+    document.getElementById('ownerModalEventDate').textContent = eventDate;
+    document.getElementById('ownerModalEventVenue').textContent = eventVenue;
+    document.getElementById('ownerModalTicketId').textContent = ticketId;
+    document.getElementById('ownerModalTicketOwner').textContent = `${owner.substring(0, 6)}...${owner.substring(owner.length - 4)}`;
+    document.getElementById('ownerModalTicketStatus').textContent = isUsed ? 'Used' : 'Valid';
+    document.getElementById('ownerModalTicketStatus').className = isUsed ? 'text-danger' : 'text-success';
+    
+    // Update use ticket button state
+    const useTicketBtn = document.getElementById('ownerUseTicketBtn');
+    useTicketBtn.disabled = isUsed;
+    useTicketBtn.dataset.ticketId = ticketId;
+    
+    // Generate QR code
+    const qrContainer = document.getElementById('ownerQrCode');
+    qrContainer.innerHTML = '';
+    const canvas = document.createElement('canvas');
+    qrContainer.appendChild(canvas);
+    await QRCode.toCanvas(canvas, JSON.stringify({
+      contractAddress: CONTRACT_ADDRESS,
+      ticketId: ticketId.toString(),
+      owner: owner
+    }), { width: 150 });
+    
+    // Show modal
+    const ownerTicketModal = new bootstrap.Modal(document.getElementById('ownerTicketModal'));
+    ownerTicketModal.show();
+    
+  } catch (error) {
+    console.error('Error showing owner ticket modal:', error);
+  }
+}
+
 // Buy ticket
 async function buyTicket() {
   try {
@@ -273,6 +410,9 @@ async function buyTicket() {
     // Reload ticket info
     await loadEventDetails();
     await loadUserTickets();
+    if (isOwner) {
+      await loadAllTickets();
+    }
     
     alert('Ticket purchased successfully!');
     
@@ -282,10 +422,10 @@ async function buyTicket() {
   }
 }
 
-// Mark ticket as used
+// Owner marks ticket as used
 async function useTicket() {
   try {
-    const ticketId = document.getElementById('useTicketBtn').dataset.ticketId;
+    const ticketId = document.getElementById('ownerUseTicketBtn').dataset.ticketId;
     
     // Send transaction
     const tx = await contract.useTicket(ticketId);
@@ -295,10 +435,11 @@ async function useTicket() {
     await tx.wait();
     
     // Close modal
-    bootstrap.Modal.getInstance(document.getElementById('ticketModal')).hide();
+    bootstrap.Modal.getInstance(document.getElementById('ownerTicketModal')).hide();
     
     // Reload ticket info
-    await loadUserTickets();
+    await loadAllTickets();
+    await loadUserTickets(); // Also reload user tickets in case owner has the ticket
     
     alert('Ticket marked as used successfully!');
     
@@ -343,6 +484,9 @@ async function transferTicket() {
     
     // Reload ticket info
     await loadUserTickets();
+    if (isOwner) {
+      await loadAllTickets();
+    }
     
     alert('Ticket transferred successfully!');
     
@@ -357,6 +501,13 @@ async function withdrawFunds() {
   try {
     if (!isOwner) {
       alert('Only the event organizer can withdraw funds');
+      return;
+    }
+    
+    // Get contract balance first to confirm funds exist
+    const balance = await provider.getBalance(CONTRACT_ADDRESS);
+    if (balance <= 0) {
+      alert('No funds to withdraw');
       return;
     }
     
